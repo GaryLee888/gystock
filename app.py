@@ -92,7 +92,7 @@ if any(queries):
                     curr, prev = df.iloc[-1], df.iloc[-2]
                     curr_p = float(curr['Close'])
                     
-                    # 診斷邏輯
+                    # 診斷邏輯 (20項)
                     conds = {
                         "均線趨勢": (curr_p > curr['MA20'], "多頭", "空頭"),
                         "布林軌道": (curr_p > curr['MA20'], "上位", "下位"),
@@ -119,13 +119,23 @@ if any(queries):
                     match_count = sum(1 for k, (cond, p, n) in conds.items() if cond)
                     score = int((match_count / 20) * 100)
                     
+                    # --- 分級決策邏輯 ---
+                    if 1 <= score <= 20:
+                        advice, color = "🚫 不能碰", "grey"
+                    elif 21 <= score <= 40:
+                        advice, color = "👀 建議觀望", "orange"
+                    elif 41 <= score <= 60:
+                        advice, color = "⚖️ 中立", "blue"
+                    elif 61 <= score <= 80:
+                        advice, color = "🧪 小量試單", "green"
+                    else: # 81-100
+                        advice, color = "🔥 強烈買進", "red"
+                    
                     # --- 置頂決策區 ---
-                    res_col1, res_col2 = st.columns([1, 1])
+                    res_col1, res_col2 = st.columns([1, 1.2])
                     with res_col1:
                         st.metric("核心評分", f"{score} 分")
                     with res_col2:
-                        advice = "🚀 建議買進" if score >= 70 else "⚖️ 建議觀望" if score >= 50 else "⚠️ 避開標的"
-                        color = "green" if score >= 70 else "orange" if score >= 50 else "red"
                         st.markdown(f"### 決策：:{color}[{advice}]")
                     
                     st.progress(score/100)
@@ -146,13 +156,13 @@ if any(queries):
                     items = list(conds.items())
                     col_a, col_b = st.columns(2)
                     
-                    with col_a: # 前 10 個
+                    with col_a:
                         for i in range(10):
                             name, (cond, p, n) = items[i]
                             icon = "🟢" if cond else "🔴"
                             st.write(f"{icon} {name}: **{p if cond else n}**")
                             
-                    with col_b: # 後 10 個
+                    with col_b:
                         for i in range(10, 20):
                             name, (cond, p, n) = items[i]
                             icon = "🟢" if cond else "🔴"
@@ -165,6 +175,7 @@ if any(queries):
                     ax.plot(df_p.index, df_p['Close'], label='Price', color='#1c2833', lw=1.5)
                     ax.plot(df_p['MA20'], label='MA20', color='#f1c40f', ls='--')
                     ax.fill_between(df_p.index, df_p['BB_up'], df_p['BB_low'], alpha=0.1, color='gray')
+                    ax.set_title(f"{query} ({sid}) 技術趨勢圖")
                     ax.legend(prop={'size': 8})
                     st.pyplot(fig)
                 else:
