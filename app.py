@@ -35,7 +35,7 @@ class StockMaster:
         if data_len < 20: return None, "Insufficient"
         
         df = df.copy()
-        # 核心指標 (20日即可計算)
+        # --- 核心指標 (Lite 模式基礎) ---
         df['MA5'] = df['Close'].rolling(5).mean()
         df['MA10'] = df['Close'].rolling(10).mean()
         df['MA20'] = df['Close'].rolling(20).mean()
@@ -65,7 +65,7 @@ class StockMaster:
         df['BIAS20'] = (df['Close'] - df['MA20']) / df['MA20'] * 100
         df['OBV'] = (np.sign(df['Close'].diff()) * df['Volume']).fillna(0).cumsum()
 
-        # 進階指標 (需 60 日)
+        # --- 進階指標 (Full 模式) ---
         mode = "Full" if data_len >= 60 else "Lite"
         if mode == "Full":
             df['ROC'] = df['Close'].pct_change(12) * 100
@@ -74,21 +74,23 @@ class StockMaster:
             down_vol = df['Volume'].where(df['Close'] < df['Close'].shift(1), 0).rolling(10).sum()
             df['Vol_Ratio'] = up_vol / down_vol.replace(0, 1)
             df['SR_Rank'] = (df['Close'] - df['Close'].rolling(60).min()) / (df['Close'].rolling(60).max() - df['Close'].rolling(60).min()).replace(0, 1)
+            df['Force_Index'] = (df['Close'] - df['Close'].shift(1)) * df['Volume']
         
         return df.dropna(), mode
 
-# --- UI 介面 ---
+# --- 側邊欄 ---
 with st.sidebar:
-    st.title("🛡️ 交易參數")
+    st.title("🛡️ 交易參數設定")
     atr_mult = st.slider("ATR 止損倍數", 1.5, 3.5, 2.2)
     reward_ratio = st.slider("盈虧比 (TP)", 1.0, 5.0, 2.0)
     st.divider()
-    st.header("🔍 批次名單")
-    default_vals = ["2330", "2317", "能率亞洲", "7861", "", "", "", "", "", ""]
+    st.header("🔍 批次掃描名單")
+    default_vals = ["2330", "2317", "2454", "能率亞洲", "2603", "2881", "3529", "8255", "", ""]
     input_queries = [st.text_input(f"股票 {i+1}", v, key=f"in_{i}") for i, v in enumerate(default_vals)]
     input_queries = [q for q in input_queries if q]
 
-st.title("🚀 台股多軌分析系統")
+# --- 主畫面 ---
+st.title("🚀 台股全方位決策系統")
 
 if input_queries:
     master = StockMaster()
@@ -106,57 +108,82 @@ if input_queries:
             
             if df is not None:
                 curr = df.iloc[-1]
+                prev = df.iloc[-2]
                 curr_p = float(curr['Close'])
                 entry_p = float(curr['MA20'])
                 sl_p = entry_p - (float(curr['ATR']) * atr_mult)
                 tp_p = entry_p + (entry_p - sl_p) * reward_ratio
 
-                # 診斷逻辑分配
+                # --- 20 項指標診斷邏輯 ---
                 conds = {
                     "均線趨勢": (curr_p > curr['MA20'], "多頭", "空頭"),
                     "KD動能": (curr['K'] > curr['D'], "向上", "向下"),
                     "MACD柱": (curr['MACD_hist'] > 0, "紅柱", "綠柱"),
                     "RSI強弱": (curr['RSI'] > 50, "強勢", "弱勢"),
-                    "布林位置": (curr_p > curr['MA20'], "上位", "下位"),
+                    "布林位置": (curr_p > curr['MA20'], "中軌上", "中軌下"),
                     "短期排列": (curr['MA5'] > curr['MA10'], "向上", "糾結"),
-                    "乖離控制": (abs(curr['BIAS20']) < 10, "安全", "過大"),
+                    "乖離安全": (abs(curr['BIAS20']) < 10, "安全", "過大"),
                     "量能狀態": (curr['Volume'] > curr['VMA20'], "放大", "萎縮"),
                     "短線力道": (curr_p > curr['MA5'], "強勁", "轉弱"),
-                    "OBV籌碼": (curr['OBV'] >= df['OBV'].mean(), "集中", "渙散")
+                    "OBV籌碼": (curr['OBV'] >= df['OBV'].mean(), "集中", "渙散"),
+                    "波動擠壓": (curr['BB_width'] < 0.1, "低波", "正常"),
+                    "價格位階": (curr_p > curr['MA10'], "穩健", "偏弱"),
+                    "動能加速": (curr['BIAS5'] > curr['BIAS20'], "加速", "趨緩")
                 }
                 
                 if mode == "Full":
                     conds.update({
-                        "價格變動": (curr['ROC'] > 0, "正向", "負向"),
+                        "價格變動率": (curr['ROC'] > 0, "正向", "負向"),
                         "資金流向": (curr['MFI'] > 50, "流入", "流出"),
-                        "買盤力道": (curr['Vol_Ratio'] > 1, "積極", "保守"),
-                        "位階健康": (curr['SR_Rank'] > 0.5, "適中", "偏低"),
-                        "動能加速": (curr['BIAS5'] > curr['BIAS20'], "加速", "趨緩")
-                        # 此處可繼續增加至 20 項...
+                        "多空量比": (curr['Vol_Ratio'] > 1, "買盤強", "賣壓大"),
+                        "60日位階": (curr['SR_Rank'] > 0.5, "健康", "偏低"),
+                        "勁道指數": (curr.get('Force_Index', 0) > 0, "多方", "空方"),
+                        "量價配合": (curr_p >= prev['Close'], "穩健", "背離"),
+                        "支撐力道": (curr_p > curr['MA20'] * 0.98, "有撐", "破位")
                     })
 
                 match_count = sum(1 for c, (cond, p, n) in conds.items() if cond)
                 score = int((match_count / len(conds)) * 100)
                 
-                # --- 頂部顯示 ---
-                st.progress(score / 100, text=f"📊 [{mode} 模式] 診斷得分：{score}% ({match_count}/{len(conds)})")
+                # --- 評分決策分級 ---
+                if score <= 20:
+                    advice, color = "🚫 不能碰", "#7f8c8d"
+                elif score <= 40:
+                    advice, color = "👀 看就好", "#95a5a6"
+                elif score <= 60:
+                    advice, color = "⚖️ 中立觀望", "#3498db"
+                elif score <= 80:
+                    advice, color = "💸 小量試單", "#f39c12"
+                else:
+                    advice, color = "🔥 強烈買進", "#e74c3c"
+
+                # --- 介面展示 ---
+                st.markdown(f"<h2 style='color:{color}; text-align:center;'>{advice} (得分: {score})</h2>", unsafe_allow_html=True)
+                st.progress(score / 100)
                 
-                c1, c2 = st.columns(2)
-                c1.metric("📌 建議買點", f"{entry_p:.2f}")
-                c2.metric("💰 目前現價", f"{curr_p:.2f}", delta=f"{curr_p - entry_p:.2f}")
+                st.divider()
                 
-                # --- 詳細資訊 ---
-                with st.expander(f"🔍 查看 {len(conds)} 項診斷清單", expanded=False):
+                # 價位資訊卡片
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("💰 目前現價", f"{curr_p:.2f}")
+                c2.metric("📌 建議買點", f"{entry_p:.2f}")
+                c3.metric("🚫 停損點", f"{sl_p:.2f}")
+                c4.metric("🎯 停利點", f"{tp_p:.2f}")
+                
+                with st.expander(f"🔍 查看完整 {len(conds)} 項診斷細節 ({mode} 模式)", expanded=False):
                     d_cols = st.columns(2)
                     for i, (name, (cond, p, n)) in enumerate(conds.items()):
                         d_cols[i % 2].write(f"{'🟢' if cond else '🔴'} **{name}**: {p if cond else n}")
 
-                st.subheader("📈 趨勢圖表")
+                st.subheader("📈 技術走勢圖")
                 fig, ax = plt.subplots(figsize=(10, 4))
                 df_p = df.tail(60)
-                ax.plot(df_p.index, df_p['Close'], color='#1c2833', lw=2)
-                ax.plot(df_p['MA20'], color='#f1c40f', ls='--')
+                ax.plot(df_p.index, df_p['Close'], color='#1c2833', lw=2, label='收盤價')
+                ax.plot(df_p['MA20'], color='#f1c40f', ls='--', label='月線(買點)')
+                ax.axhline(sl_p, color='#e74c3c', ls=':', label='停損線')
+                ax.axhline(tp_p, color='#27ae60', ls=':', label='停利線')
                 ax.fill_between(df_p.index, df_p['BB_up'], df_p['BB_low'], color='gray', alpha=0.1)
+                ax.legend(loc='upper left', fontsize='small')
                 st.pyplot(fig)
             else:
-                st.error(f"⚠️ {query} 數據不足 (需至少 20 筆才能啟動精簡分析)")
+                st.error(f"⚠️ {query} 數據不足，無法啟動分析。")
