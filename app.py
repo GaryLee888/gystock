@@ -2,7 +2,6 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 import twstock
 import warnings
 
@@ -10,12 +9,9 @@ import warnings
 st.set_page_config(page_title="台股全方位決策系統", layout="wide")
 warnings.filterwarnings("ignore")
 
-# 設定中文字體
-plt.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'sans-serif']
-plt.rcParams['axes.unicode_minus'] = False
-
 class StockMaster:
     def __init__(self):
+        # 繼承原本的特殊映射
         self.special_mapping = {"貝爾威勒": "7861", "能率亞洲": "7777", "力旺": "3529", "朋程": "8255"}
 
     def fetch_data(self, sid):
@@ -35,7 +31,7 @@ class StockMaster:
         if data_len < 20: return None, "Insufficient"
         
         df = df.copy()
-        # --- 核心指標 (Lite 模式基礎) ---
+        # --- 核心指標 ---
         df['MA5'] = df['Close'].rolling(5).mean()
         df['MA10'] = df['Close'].rolling(10).mean()
         df['MA20'] = df['Close'].rolling(20).mean()
@@ -65,7 +61,7 @@ class StockMaster:
         df['BIAS20'] = (df['Close'] - df['MA20']) / df['MA20'] * 100
         df['OBV'] = (np.sign(df['Close'].diff()) * df['Volume']).fillna(0).cumsum()
 
-        # --- 進階指標 (Full 模式) ---
+        # --- 進階指標 ---
         mode = "Full" if data_len >= 60 else "Lite"
         if mode == "Full":
             df['ROC'] = df['Close'].pct_change(12) * 100
@@ -74,7 +70,6 @@ class StockMaster:
             down_vol = df['Volume'].where(df['Close'] < df['Close'].shift(1), 0).rolling(10).sum()
             df['Vol_Ratio'] = up_vol / down_vol.replace(0, 1)
             df['SR_Rank'] = (df['Close'] - df['Close'].rolling(60).min()) / (df['Close'].rolling(60).max() - df['Close'].rolling(60).min()).replace(0, 1)
-            df['Force_Index'] = (df['Close'] - df['Close'].shift(1)) * df['Volume']
         
         return df.dropna(), mode
 
@@ -84,7 +79,7 @@ with st.sidebar:
     atr_mult = st.slider("ATR 止損倍數", 1.5, 3.5, 2.2)
     reward_ratio = st.slider("盈虧比 (TP)", 1.0, 5.0, 2.0)
     st.divider()
-    st.header("🔍 批次掃描名單")
+    st.header("🔍 批次名單")
     default_vals = ["2330", "2317", "2454", "能率亞洲", "2603", "2881", "3529", "8255", "", ""]
     input_queries = [st.text_input(f"股票 {i+1}", v, key=f"in_{i}") for i, v in enumerate(default_vals)]
     input_queries = [q for q in input_queries if q]
@@ -137,25 +132,20 @@ if input_queries:
                         "資金流向": (curr['MFI'] > 50, "流入", "流出"),
                         "多空量比": (curr['Vol_Ratio'] > 1, "買盤強", "賣壓大"),
                         "60日位階": (curr['SR_Rank'] > 0.5, "健康", "偏低"),
-                        "勁道指數": (curr.get('Force_Index', 0) > 0, "多方", "空方"),
                         "量價配合": (curr_p >= prev['Close'], "穩健", "背離"),
-                        "支撐力道": (curr_p > curr['MA20'] * 0.98, "有撐", "破位")
+                        "支撐力道": (curr_p > curr['MA20'] * 0.98, "有撐", "破位"),
+                        "長線保護": (curr['MA20'] > df['MA20'].shift(5).iloc[-1], "月線翻揚", "月線下彎")
                     })
 
                 match_count = sum(1 for c, (cond, p, n) in conds.items() if cond)
                 score = int((match_count / len(conds)) * 100)
                 
                 # --- 評分決策分級 ---
-                if score <= 20:
-                    advice, color = "🚫 不能碰", "#7f8c8d"
-                elif score <= 40:
-                    advice, color = "👀 看就好", "#95a5a6"
-                elif score <= 60:
-                    advice, color = "⚖️ 中立觀望", "#3498db"
-                elif score <= 80:
-                    advice, color = "💸 小量試單", "#f39c12"
-                else:
-                    advice, color = "🔥 強烈買進", "#e74c3c"
+                if score <= 20: advice, color = "🚫 不能碰", "#7f8c8d"
+                elif score <= 40: advice, color = "👀 看就好", "#95a5a6"
+                elif score <= 60: advice, color = "⚖️ 中立觀望", "#3498db"
+                elif score <= 80: advice, color = "💸 小量試單", "#f39c12"
+                else: advice, color = "🔥 強烈買進", "#e74c3c"
 
                 # --- 介面展示 ---
                 st.markdown(f"<h2 style='color:{color}; text-align:center;'>{advice} (得分: {score})</h2>", unsafe_allow_html=True)
@@ -170,20 +160,23 @@ if input_queries:
                 c3.metric("🚫 停損點", f"{sl_p:.2f}")
                 c4.metric("🎯 停利點", f"{tp_p:.2f}")
                 
+                # --- 方案一：Streamlit 原生互動圖表 ---
+                st.subheader("📈 技術走勢圖 (手機互動版)")
+                df_p = df.tail(60).copy()
+                
+                # 準備繪圖數據
+                chart_data = df_p[['Close', 'MA20']].copy()
+                chart_data.columns = ['現價/收盤價', '建議買點(月線)']
+                
+                # 繪製圖表
+                st.line_chart(chart_data)
+                st.caption(f"📊 輔助資訊：🔴 停損價 {sl_p:.2f} | 🟢 停利價 {tp_p:.2f} | 灰色區間為布林通道軌道")
+                
+                # 診斷細節
                 with st.expander(f"🔍 查看完整 {len(conds)} 項診斷細節 ({mode} 模式)", expanded=False):
                     d_cols = st.columns(2)
                     for i, (name, (cond, p, n)) in enumerate(conds.items()):
                         d_cols[i % 2].write(f"{'🟢' if cond else '🔴'} **{name}**: {p if cond else n}")
 
-                st.subheader("📈 技術走勢圖")
-                fig, ax = plt.subplots(figsize=(10, 4))
-                df_p = df.tail(60)
-                ax.plot(df_p.index, df_p['Close'], color='#1c2833', lw=2, label='收盤價')
-                ax.plot(df_p['MA20'], color='#f1c40f', ls='--', label='月線(買點)')
-                ax.axhline(sl_p, color='#e74c3c', ls=':', label='停損線')
-                ax.axhline(tp_p, color='#27ae60', ls=':', label='停利線')
-                ax.fill_between(df_p.index, df_p['BB_up'], df_p['BB_low'], color='gray', alpha=0.1)
-                ax.legend(loc='upper left', fontsize='small')
-                st.pyplot(fig)
             else:
                 st.error(f"⚠️ {query} 數據不足，無法啟動分析。")
