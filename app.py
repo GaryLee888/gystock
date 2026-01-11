@@ -2,17 +2,22 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 import twstock
 import warnings
 
 # --- 基礎設定 ---
-st.set_page_config(page_title="台股全方位分析", layout="wide")
+st.set_page_config(page_title="台股極簡決策版", layout="wide")
 warnings.filterwarnings("ignore")
 
-# 設定中文字體
-plt.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'sans-serif']
-plt.rcParams['axes.unicode_minus'] = False
+# 注入 CSS 讓文字更小、間距更緊湊，適合手機一頁看完
+st.markdown("""
+    <style>
+    .reportview-container .main .block-container { padding-top: 1rem; padding-bottom: 1rem; }
+    .stMetric { padding: 0px 5px !important; }
+    div[data-testid="stMarkdownContainer"] p { font-size: 13px !important; margin-bottom: 0px !important; }
+    .stProgress > div > div > div > div { height: 10px !important; }
+    </style>
+    """, unsafe_allow_html=True)
 
 class StockMaster:
     def __init__(self):
@@ -64,19 +69,15 @@ class StockMaster:
 
 # --- 側邊欄 ---
 with st.sidebar:
-    st.title("⚙️ 參數設定")
-    atr_mult = st.number_input("ATR 止損倍數", 1.0, 5.0, 2.2)
-    reward_ratio = st.number_input("盈虧比", 1.0, 5.0, 2.0)
-    st.divider()
-    default_stocks = ["2330", "2317", "2454", "能率亞洲", "2603", "2881", "", "", "", ""]
-    queries = [st.text_input(f"股票 {i+1}", v, key=f"q{i}") for i, v in enumerate(default_stocks) if v or i < 6]
+    st.header("⚙️ 參數")
+    atr_mult = st.number_input("ATR倍數", 1.0, 5.0, 2.2, 0.1)
+    reward_ratio = st.number_input("盈虧比", 1.0, 5.0, 2.0, 0.1)
+    queries = [st.text_input(f"股{i+1}", v, key=f"q{i}") for i, v in enumerate(["2330","2317","2454","能率亞洲","2603","2881"])]
 
 # --- 主畫面 ---
-st.title("💹 台股全方位決策系統")
-
 if any(queries):
     master = StockMaster()
-    tabs = st.tabs([f"🔍 {q}" for q in queries if q])
+    tabs = st.tabs([f"{q}" for q in queries if q])
     
     for tab, query in zip(tabs, [q for q in queries if q]):
         with tab:
@@ -92,93 +93,65 @@ if any(queries):
                     curr, prev = df.iloc[-1], df.iloc[-2]
                     curr_p = float(curr['Close'])
                     
-                    # 診斷邏輯 (20項)
+                    # 診斷
                     conds = {
-                        "均線趨勢": (curr_p > curr['MA20'], "多頭", "空頭"),
-                        "布林軌道": (curr_p > curr['MA20'], "上位", "下位"),
-                        "KD動能": (curr['K'] > curr['D'], "向上", "向下"),
-                        "MACD趨勢": (curr['MACD_hist'] > 0, "多方", "空方"),
-                        "RSI強弱": (curr['RSI'] > 50, "強勢", "弱勢"),
-                        "多頭排列": (curr['MA5'] > curr['MA10'], "向上", "糾結"),
-                        "威廉指標": (curr['K'] > 50, "多主", "空主"),
-                        "乖離控制": (abs(curr['BIAS20']) < 10, "安全", "偏離"),
-                        "低波擠壓": (curr['BB_width'] < 0.1, "擠壓", "正常"),
-                        "量價配合": (curr_p >= prev['Close'], "穩健", "背離"),
-                        "相對強度": (curr_p > prev['Close'], "優勢", "弱勢"),
-                        "籌碼OBV": (curr['OBV'] >= df['OBV'].mean(), "集中", "渙散"),
-                        "資金流向": (curr['MFI'] > 50, "流入", "流出"),
-                        "成交均量": (curr['Volume'] > curr['VMA20'], "放大", "萎縮"),
-                        "短線勁道": (curr_p > curr['MA5'], "強勁", "轉弱"),
-                        "動能加速": (curr['BIAS5'] > curr['BIAS20'], "加速", "趨緩"),
-                        "站穩支撐": (curr_p > curr['MA20'], "穩固", "沉重"),
-                        "多空量比": (curr['Vol_Ratio'] > 1, "積極", "較大"),
-                        "趨勢變動": (curr['ROC'] > 0, "正向", "負向"),
-                        "位階評估": (curr_p > df['Close'].tail(60).min(), "健康", "偏低")
+                        "MA": (curr_p > curr['MA20'], "多", "空"),
+                        "BB": (curr_p > curr['MA20'], "上", "下"),
+                        "KD": (curr['K'] > curr['D'], "↑", "↓"),
+                        "MACD": (curr['MACD_hist'] > 0, "紅", "綠"),
+                        "RSI": (curr['RSI'] > 50, "強", "弱"),
+                        "排列": (curr['MA5'] > curr['MA10'], "正", "偏"),
+                        "威廉": (curr['K'] > 50, "多", "空"),
+                        "乖離": (abs(curr['BIAS20']) < 10, "安", "偏"),
+                        "擠壓": (curr['BB_width'] < 0.1, "縮", "常"),
+                        "量價": (curr_p >= prev['Close'], "穩", "背"),
+                        "相對": (curr_p > prev['Close'], "優", "劣"),
+                        "OBV": (curr['OBV'] >= df['OBV'].mean(), "集", "渙"),
+                        "資金": (curr['MFI'] > 50, "入", "出"),
+                        "均量": (curr['Volume'] > curr['VMA20'], "增", "縮"),
+                        "短勁": (curr_p > curr['MA5'], "強", "弱"),
+                        "加速": (curr['BIAS5'] > curr['BIAS20'], "加", "減"),
+                        "支撐": (curr_p > curr['MA20'], "穩", "沉"),
+                        "量比": (curr['Vol_Ratio'] > 1, "積極", "賣壓"),
+                        "趨勢": (curr['ROC'] > 0, "正", "負"),
+                        "位階": (curr_p > df['Close'].tail(60).min(), "健", "低")
                     }
                     
                     match_count = sum(1 for k, (cond, p, n) in conds.items() if cond)
                     score = int((match_count / 20) * 100)
                     
-                    # --- 分級決策邏輯 ---
-                    if 1 <= score <= 20:
-                        advice, color = "🚫 不能碰", "grey"
-                    elif 21 <= score <= 40:
-                        advice, color = "👀 建議觀望", "orange"
-                    elif 41 <= score <= 60:
-                        advice, color = "⚖️ 中立", "blue"
-                    elif 61 <= score <= 80:
-                        advice, color = "🧪 小量試單", "green"
-                    else: # 81-100
-                        advice, color = "🔥 強烈買進", "red"
-                    
-                    # --- 置頂決策區 ---
-                    res_col1, res_col2 = st.columns([1, 1.2])
-                    with res_col1:
-                        st.metric("核心評分", f"{score} 分")
-                    with res_col2:
-                        st.markdown(f"### 決策：:{color}[{advice}]")
-                    
-                    st.progress(score/100)
-                    st.divider()
+                    # 決策邏輯
+                    if score <= 20: advice, color = "不能碰", "grey"
+                    elif score <= 40: advice, color = "建議觀望", "orange"
+                    elif score <= 60: advice, color = "中立", "blue"
+                    elif score <= 80: advice, color = "小量試單", "green"
+                    else: advice, color = "強烈買進", "red"
 
-                    # --- 數據卡片 ---
+                    # --- 第一層：評分與建議 ---
+                    st.write(f"### **{score}分 | :{color}[{advice}]**")
+                    st.progress(score/100)
+                    
+                    # --- 第二層：核心價位 ---
                     entry_p = float(curr['MA20'])
                     sl_p = entry_p - (float(curr['ATR']) * atr_mult)
                     tp_p = entry_p + (entry_p - sl_p) * reward_ratio
+                    
                     c1, c2, c3, c4 = st.columns(4)
-                    c1.metric("現價", f"{curr_p:.2f}")
-                    c2.metric("買點", f"{entry_p:.1f}")
-                    c3.metric("止損", f"{sl_p:.1f}")
-                    c4.metric("獲利", f"{tp_p:.1f}")
+                    c1.metric("現價", f"{curr_p:.0f}")
+                    c2.metric("買點", f"{entry_p:.0f}")
+                    c3.metric("止損", f"{sl_p:.0f}")
+                    c4.metric("獲利", f"{tp_p:.0f}")
 
-                    # --- 20項指標 10x2 排版 ---
-                    st.subheader("📊 20項綜合診斷 (10個一列)")
+                    # --- 第三層：20項診斷網格 (5x4) ---
+                    st.write("---")
                     items = list(conds.items())
-                    col_a, col_b = st.columns(2)
+                    rows = [items[i:i + 4] for i in range(0, len(items), 4)]
                     
-                    with col_a:
-                        for i in range(10):
-                            name, (cond, p, n) = items[i]
-                            icon = "🟢" if cond else "🔴"
-                            st.write(f"{icon} {name}: **{p if cond else n}**")
-                            
-                    with col_b:
-                        for i in range(10, 20):
-                            name, (cond, p, n) = items[i]
-                            icon = "🟢" if cond else "🔴"
-                            st.write(f"{icon} {name}: **{p if cond else n}**")
-                    
-                    # --- 圖表 ---
-                    st.divider()
-                    fig, ax = plt.subplots(figsize=(10, 4))
-                    df_p = df.tail(65)
-                    ax.plot(df_p.index, df_p['Close'], label='Price', color='#1c2833', lw=1.5)
-                    ax.plot(df_p['MA20'], label='MA20', color='#f1c40f', ls='--')
-                    ax.fill_between(df_p.index, df_p['BB_up'], df_p['BB_low'], alpha=0.1, color='gray')
-                    ax.set_title(f"{query} ({sid}) 技術趨勢圖")
-                    ax.legend(prop={'size': 8})
-                    st.pyplot(fig)
-                else:
-                    st.error("數據不足")
-            else:
-                st.error("查無數據")
+                    for row in rows:
+                        cols = st.columns(4)
+                        for i, (name, (cond, p, n)) in enumerate(row):
+                            icon = "●" # 簡化圓點
+                            clr = "green" if cond else "red"
+                            cols[i].markdown(f":{clr}[{icon}] **{name}**\n\n{p if cond else n}")
+                else: st.error("數據不足")
+            else: st.error("無數據")
